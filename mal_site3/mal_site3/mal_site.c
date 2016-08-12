@@ -4,23 +4,26 @@
 #include "windivert.h"
 #define MAXURL 4096
 
-
 typedef struct
 {
 	char *domain;
 	char *uri;
-} URL, *PURL;
-
+} URL, *Ps;
 
 #define MAXBUF 1500
-void CheckURL(char *http) {
+
+void CheckURL(char *http, FILE *fp,FILE *fout) {
 	static const char get_str[] = "GET /";
 	static const char post_str[] = "POST /";
 	static const char http_host_str[] = " HTTP/1.1\r\nHost: ";
+	static const char httpuse[]= "http://";
 	char domain[MAXURL];
 	char uri[MAXURL];
-	UINT16 i = 0,j=0;
+	UINT16 i = 0,j=0,c1,c2,count;
 	URL url = { domain, uri };
+	char blackurl[100] = { 0, };;
+	char *findurl;
+	int urllen;
 	//printf("%c %c\n", http[0], http[1]);
 	//system("pause");
 	if (strncmp(http, get_str, sizeof(get_str) - 1) == 0)
@@ -64,9 +67,48 @@ void CheckURL(char *http) {
 		}
 	}
 	domain[j] = '\0';
-	printf("URL %s: \n", domain);
-	//printf("URL %s/%s: \n", domain, uri);
+	while (!feof(fp)){
+		c1 = 0;
+		c2 = 0;
+		fgets(blackurl, 100, fp);
+		if (strncmp(blackurl, "http://", 7) == 0) {//url: http://
+			c1 = c1 + 7;
+			if (strncmp(blackurl+7, "www.", 4) == 0) { //url: http:// www
+				c1 = c1 + 4;
+			}
+		}
+		if (strncmp(blackurl, "www.", 4) == 0) { //url: www
+			c1 = c1 + 4;
+		}
 
+
+		if (strncmp(domain, "http://", 7) == 0) {//url: http://
+			c2 = c2 + 7;
+			if (strncmp(domain+7, "www.",  4) == 0) { //url: http:// www
+				c2 = c2 + 4;
+			}
+		}
+		if (strncmp(domain, "www.",  4) == 0) { //url : www
+			c2 = c2 + 4;
+		}
+
+		count = 0;
+		while (1) {
+			
+			if (blackurl[c1 + count] == NULL) break;
+			count++;
+		}
+		findurl = (char *)malloc(count);
+		memset(findurl, 0, count);
+		memcpy(findurl, blackurl + c1, count - 1);
+
+		if (strstr(domain, findurl) != NULL) {
+			printf("[URL Block] : %s\n", domain);
+			fprintf(fout, "%s\n", domain);
+		}
+		
+	}
+	fseek(fp, 0, SEEK_SET);
 }
 
 int main() {
@@ -78,7 +120,13 @@ int main() {
 	PWINDIVERT_IPHDR ip_header;
 	PWINDIVERT_TCPHDR tcp_header;
 	
-
+	FILE *fp,*fout;
+	fp = fopen("mal_site.txt", "r");
+	fout = fopen("malsite_log.txt", "w");
+	if (fp == NULL) {
+		fprintf(stderr, "Can't open blacklist file\n");
+		exit(1);
+	}
 	handle = WinDivertOpen(
 		"ip && "                    // Only IPv4 supported
 		"(tcp.DstPort == 80 || tcp.SrcPort == 80) && "     // HTTP (port 80) 
@@ -105,29 +153,11 @@ int main() {
 		ip_header = &packet;
 		tcp_header = (char *)ip_header + (int)(ip_header->HdrLength *4) ;
 		http = (char *)tcp_header + (int)tcp_header->HdrLength * 4;
-		//printf("%s\n", http);
-		
-		//printf("%d\n",tcp_header->DstPort);
-		
-		// http ?
-		// HTTP/1.1
 
-		CheckURL(http);
-
-
-
-
-
-
-		// Modify packet.
-
-		if (!WinDivertSend(handle, packet, packetLen, &addr, NULL))
-		{
-			// Handle send error
-			continue;
-		}
+		CheckURL(http,fp,fout);
 	}
 
-
+	close(fp);
+	close(fout);
 }
 
